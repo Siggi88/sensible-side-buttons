@@ -36,6 +36,8 @@ static void SBFFakeSwipe(TLInfoSwipeDirection dir) {
     CFRelease(event2);
 }
 
+static BOOL swapAxis = NO;
+
 static CGEventRef SBFMouseCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *refcon) {
     int64_t number = CGEventGetIntegerValueField(event, kCGMouseEventButtonNumber);
     BOOL down = (CGEventGetType(event) == kCGEventOtherMouseDown);
@@ -57,9 +59,31 @@ static CGEventRef SBFMouseCallback(CGEventTapProxy proxy, CGEventType type, CGEv
         
         return NULL;
     }
+    else if (number == 5) {
+        if (down) {
+            swapAxis = !swapAxis;
+        }
+        return NULL;
+    }
     else {
         return event;
     }
+}
+
+#define SIGN(x) (((x) > 0) - ((x) < 0))
+#define LINES 3
+
+static CGEventRef MouseScrollCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *refcon) {
+    if (!CGEventGetIntegerValueField(event, kCGScrollWheelEventIsContinuous)) {
+        int64_t delta = CGEventGetIntegerValueField(event, kCGScrollWheelEventPointDeltaAxis1);
+        if (swapAxis) {
+            CGEventSetIntegerValueField(event, kCGScrollWheelEventDeltaAxis1, 0);
+            CGEventSetIntegerValueField(event, kCGScrollWheelEventDeltaAxis2, SIGN(delta) * LINES);
+        } else {
+            CGEventSetIntegerValueField(event, kCGScrollWheelEventDeltaAxis1, SIGN(delta) * LINES);
+        }
+    }
+    return event;
 }
 
 typedef NS_ENUM(NSInteger, MenuMode) {
@@ -89,6 +113,7 @@ typedef NS_ENUM(NSInteger, MenuItem) {
 @interface AppDelegate () <NSMenuDelegate>
 @property (nonatomic, retain) NSStatusItem* statusItem;
 @property (nonatomic, assign) CFMachPortRef tap;
+@property (nonatomic, assign) CFMachPortRef tap_ScrollWheel;
 @property (nonatomic, assign) MenuMode menuMode;
 @end
 
@@ -333,6 +358,16 @@ typedef NS_ENUM(NSInteger, MenuItem) {
                 CGEventTapEnable(self.tap, true);
             }
         }
+        if (self.tap_ScrollWheel == NULL) {
+            self.tap_ScrollWheel = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap, 0, 1 << kCGEventScrollWheel, &MouseScrollCallback, NULL);
+            if (self.tap_ScrollWheel != NULL) {
+                CFRunLoopSourceRef runLoopSource = CFMachPortCreateRunLoopSource(NULL, self.tap_ScrollWheel, 0);
+                CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, kCFRunLoopCommonModes);
+                CFRelease(runLoopSource);
+                
+                CGEventTapEnable(self.tap_ScrollWheel, true);
+            }
+        }
     }
     else {
         if (self.tap != NULL) {
@@ -340,6 +375,12 @@ typedef NS_ENUM(NSInteger, MenuItem) {
             CFRelease(self.tap);
             
             self.tap = NULL;
+        }
+        if (self.tap_ScrollWheel != NULL) {
+            CGEventTapEnable(self.tap_ScrollWheel, NO);
+            CFRelease(self.tap_ScrollWheel);
+            
+            self.tap_ScrollWheel = NULL;
         }
     }
     
